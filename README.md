@@ -17,7 +17,7 @@ It allows you to transfer files between a laptop/desktop and a mobile device usi
 - Elapsed time display
 - Estimated remaining time (ETA)
 - File size display
-- Text-message sending from the browser to the server terminal
+- Two-way text messaging & chat between PC and connected devices (with auto PC Name & IP tagging)
 - Mobile-friendly web interface
 - Configurable shared folders
 - Path-traversal protection

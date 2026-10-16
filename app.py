@@ -2,6 +2,7 @@ import json
 import os
 import socket
 import sys
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -63,6 +64,13 @@ def save_custom_folders():
 
 
 # =========================================================
+# MESSAGING & CHAT STORAGE
+# =========================================================
+MESSAGES = []
+HOST_PC_NAME = socket.gethostname()
+
+
+# =========================================================
 # HELPERS
 # =========================================================
 def get_root(folder_key: str) -> Path:
@@ -113,6 +121,69 @@ def is_host_request() -> bool:
     except Exception:
         pass
     return False
+
+
+def get_device_name_from_ua(ua_string: str) -> str:
+    """Extract human-friendly device model or OS name from User-Agent."""
+    if not ua_string:
+        return "Client Device"
+    ua = ua_string
+    if "iPhone" in ua:
+        return "iPhone"
+    if "iPad" in ua:
+        return "iPad"
+    if "Android" in ua:
+        import re
+        match = re.search(r";\s*([A-Za-z0-9\-\s_]+?)\s*(?:Build|[;\)])", ua)
+        if match:
+            model = match.group(1).strip()
+            if model and len(model) < 25 and not model.lower().startswith("linux"):
+                return f"Android ({model})"
+        return "Android Phone"
+    if "Windows" in ua:
+        return "Windows PC"
+    if "Macintosh" in ua:
+        return "Mac"
+    if "Linux" in ua:
+        return "Linux Device"
+    return "Client Device"
+
+
+IP_HOSTNAME_CACHE = {}
+
+
+def resolve_client_name(ip: str, user_agent_str: str = "") -> str:
+    """Resolve real PC hostname via NetBIOS / reverse DNS, or fall back to device/OS detection."""
+    if not ip or ip in ("127.0.0.1", "::1", "localhost"):
+        return f"{HOST_PC_NAME} (Host PC)"
+
+    if ip == get_local_ip():
+        return f"{HOST_PC_NAME} (Host PC)"
+
+    if ip in IP_HOSTNAME_CACHE:
+        return IP_HOSTNAME_CACHE[ip]
+
+    resolved = ""
+    try:
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(1.2)
+        try:
+            hostname = socket.gethostbyaddr(ip)[0]
+            clean = hostname.split(".")[0].strip()
+            # Verify clean name is not just an IP address
+            if clean and not clean.replace(".", "").isdigit():
+                resolved = clean
+        finally:
+            socket.setdefaulttimeout(old_timeout)
+    except Exception:
+        pass
+
+    # 2. If reverse DNS didn't resolve a name, detect device / OS from User-Agent
+    if not resolved:
+        resolved = get_device_name_from_ua(user_agent_str)
+
+    IP_HOSTNAME_CACHE[ip] = resolved
+    return resolved
 
 
 # =========================================================
@@ -461,16 +532,201 @@ HTML_PAGE = r"""
         .fs-dir-item:last-child {
             border-bottom: none;
         }
+
+        /* Live Chat Styling */
+        .chat-box {
+            border: 1px solid #e2e8f0;
+        }
+
+        .chat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .chat-badge {
+            background: #e0e7ff;
+            color: #3730a3;
+            font-size: 11px;
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 999px;
+            margin-left: 6px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        .chat-messages-list {
+            max-height: 260px;
+            min-height: 120px;
+            overflow-y: auto;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 12px;
+            margin-top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            scroll-behavior: smooth;
+        }
+
+        .chat-empty {
+            color: #94a3b8;
+            font-size: 13px;
+            text-align: center;
+            margin: auto;
+            padding: 24px 0;
+        }
+
+        .chat-bubble {
+            background: #ffffff;
+            border-radius: 10px;
+            padding: 10px 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            border-left: 4px solid #cbd5e1;
+        }
+
+        .chat-bubble.host {
+            border-left: 4px solid #2563eb;
+            background: #f8faff;
+        }
+
+        .chat-bubble.client {
+            border-left: 4px solid #10b981;
+            background: #fafffc;
+        }
+
+        .chat-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #64748b;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .chat-sender {
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .chat-sender.host {
+            color: #1e40af;
+        }
+
+        .chat-sender.client {
+            color: #047857;
+        }
+
+        .chat-ip-badge {
+            font-family: monospace;
+            background: #e2e8f0;
+            color: #334155;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: normal;
+        }
+
+        .chat-time {
+            font-size: 11px;
+            color: #94a3b8;
+        }
+
+        .chat-text {
+            color: #1e293b;
+            font-size: 14px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .chat-text a {
+            color: #2563eb;
+            text-decoration: underline;
+            word-break: break-all;
+        }
+
+        .chat-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 2px;
+        }
+
+        .chat-copy-btn {
+            background: none;
+            border: none;
+            color: #64748b;
+            font-size: 11px;
+            cursor: pointer;
+            padding: 2px 6px;
+            width: auto;
+            margin: 0;
+            border-radius: 4px;
+        }
+
+        .chat-copy-btn:hover {
+            background: #e2e8f0;
+            color: #0f172a;
+        }
+
+        .chat-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .chat-input-row input {
+            margin-top: 0;
+            flex: 1;
+        }
+
+        .chat-send-btn {
+            width: auto;
+            min-width: 90px;
+            margin-top: 0;
+            padding: 12px 18px;
+        }
     </style>
 </head>
 <body>
 <div class="container">
     <h1>Python Local Transfer</h1>
 
-    <div class="box">
-        <h3>Send Text Message</h3>
-        <input type="text" id="msgInput" placeholder="Type a message...">
-        <button onclick="sendMessage()">Send Message</button>
+    <div class="box chat-box">
+        <div class="chat-header">
+            <div>
+                <h3 style="margin:0; display:inline-block;">💬 Messages & Chat</h3>
+                <span class="chat-badge" id="chatCountBadge">0 msgs</span>
+            </div>
+            <div style="display:flex; gap:6px;">
+                <button type="button" class="gray small-button" onclick="loadMessages(true)" title="Refresh chat">🔄 Refresh</button>
+                <button type="button" class="gray small-button" onclick="clearMessages()" title="Clear chat history">🗑️ Clear</button>
+            </div>
+        </div>
+        <div class="muted" style="margin-top:6px; font-size:13px;">
+            Send notes, links, or text instantly between Laptop and connected devices. Device name & IP are attached automatically.
+        </div>
+
+        <div id="chatMessages" class="chat-messages-list">
+            <div class="chat-empty">No messages yet. Type below to send a message.</div>
+        </div>
+
+        <div class="chat-input-row">
+            <input type="text" id="msgInput" placeholder="Type a message or paste a URL..." onkeydown="if(event.key === 'Enter') sendMessage()">
+            <button type="button" class="blue chat-send-btn" id="msgSendBtn" onclick="sendMessage()">Send</button>
+        </div>
     </div>
 
     {% if is_host %}
@@ -672,14 +928,184 @@ HTML_PAGE = r"""
         elapsedText.textContent = formatTime(elapsedSeconds);
     }
 
+    let lastRenderedMessageCount = -1;
+
+    function escapeHtml(str) {
+        if (!str) return "";
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function formatChatLinks(text) {
+        const escaped = escapeHtml(text);
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        return escaped.replace(urlRegex, (url) => {
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+        });
+    }
+
+    async function loadMessages(forceScroll = false) {
+        try {
+            const response = await fetch("/api/messages");
+            if (!response.ok) return;
+            const data = await response.json();
+            if (!data.success || !Array.isArray(data.messages)) return;
+
+            const badge = document.getElementById("chatCountBadge");
+            if (badge) {
+                badge.textContent = `${data.messages.length} ${data.messages.length === 1 ? 'msg' : 'msgs'}`;
+            }
+
+            const container = document.getElementById("chatMessages");
+            if (!container) return;
+
+            if (data.messages.length === lastRenderedMessageCount && !forceScroll) {
+                return;
+            }
+
+            const isNearBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 60;
+            lastRenderedMessageCount = data.messages.length;
+
+            if (data.messages.length === 0) {
+                container.innerHTML = '<div class="chat-empty">No messages yet. Type below to send a message.</div>';
+                return;
+            }
+
+            let html = "";
+            data.messages.forEach(msg => {
+                const bubbleClass = msg.is_host ? "host" : "client";
+                const senderClass = msg.is_host ? "host" : "client";
+                const icon = (msg.is_host || msg.is_pc) ? "💻" : "📱";
+                const senderLabel = escapeHtml(msg.sender_name || (msg.is_host ? "Host PC" : "Client"));
+                const ipLabel = escapeHtml(msg.sender_ip || "");
+                const timeLabel = escapeHtml(msg.time || "");
+                const textHtml = formatChatLinks(msg.text || "");
+
+                const safeText = encodeURIComponent(msg.text || "");
+
+                html += `
+                    <div class="chat-bubble ${bubbleClass}">
+                        <div class="chat-meta">
+                            <span class="chat-sender ${senderClass}">
+                                <span>${icon}</span>
+                                <strong>${senderLabel}</strong>
+                                ${ipLabel ? `<span class="chat-ip-badge">${ipLabel}</span>` : ""}
+                            </span>
+                            <span class="chat-time">${timeLabel}</span>
+                        </div>
+                        <div class="chat-text" id="chat-msg-${msg.id}">${textHtml}</div>
+                        <div class="chat-actions">
+                            <button type="button" class="chat-copy-btn" data-text="${safeText}" onclick="copyChatMessage(this)">📋 Copy</button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+
+            if (forceScroll || isNearBottom) {
+                container.scrollTop = container.scrollHeight;
+            }
+        } catch (err) {
+            console.error("Error loading messages:", err);
+        }
+    }
+
+    function copyTextToClipboard(text) {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.left = "0";
+        ta.style.top = "0";
+        ta.style.width = "40px";
+        ta.style.height = "40px";
+        ta.style.padding = "0";
+        ta.style.border = "none";
+        ta.style.outline = "none";
+        ta.style.boxShadow = "none";
+        ta.style.background = "transparent";
+        ta.style.color = "transparent";
+        ta.style.fontSize = "16px";
+        document.body.appendChild(ta);
+
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+
+        let ok = false;
+        try {
+            ok = document.execCommand("copy");
+        } catch (err) {
+            ok = false;
+        }
+
+        document.body.removeChild(ta);
+        return ok;
+    }
+
+    function copyChatMessage(btn) {
+        let text = "";
+        const raw = btn.getAttribute("data-text");
+        if (raw) {
+            try {
+                text = decodeURIComponent(raw);
+            } catch (_) {
+                text = raw;
+            }
+        }
+        if (!text) {
+            const bubble = btn.closest(".chat-bubble");
+            const textEl = bubble ? bubble.querySelector(".chat-text") : null;
+            text = textEl ? (textEl.innerText || textEl.textContent || "") : "";
+        }
+        if (!text) return;
+
+        function showSuccess() {
+            if (!btn) return;
+            const original = btn.innerHTML;
+            btn.innerHTML = "✅ Copied!";
+            btn.style.color = "#16a34a";
+            setTimeout(() => {
+                btn.innerHTML = original;
+                btn.style.color = "";
+            }, 1600);
+        }
+
+        // Try synchronous execCommand first
+        const ok = copyTextToClipboard(text);
+        if (ok) {
+            showSuccess();
+            return;
+        }
+
+        // Try modern Clipboard API
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+                showSuccess();
+            }).catch(() => {
+                window.prompt("Copy this message (Ctrl+C):", text);
+            });
+            return;
+        }
+
+        window.prompt("Copy this message (Ctrl+C):", text);
+    }
+
     async function sendMessage() {
         const input = document.getElementById("msgInput");
+        const sendBtn = document.getElementById("msgSendBtn");
         const message = input.value.trim();
 
         if (!message) {
-            alert("Please type a message first.");
+            input.focus();
             return;
         }
+
+        if (sendBtn) sendBtn.disabled = true;
 
         try {
             const response = await fetch("/api/message", {
@@ -689,14 +1115,53 @@ HTML_PAGE = r"""
             });
 
             const data = await response.json();
-            alert(data.text || "Message sent.");
-
             if (response.ok && data.success) {
                 input.value = "";
+                await loadMessages(true);
+            } else {
+                alert(data.text || "Failed to send message.");
             }
         } catch (error) {
             alert(`Message failed: ${error.message}`);
+        } finally {
+            if (sendBtn) sendBtn.disabled = false;
+            input.focus();
         }
+    }
+
+    async function clearMessages() {
+        if (!confirm("Are you sure you want to clear all messages?")) return;
+
+        try {
+            const res = await fetch("/api/messages/clear", { method: "POST" });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                lastRenderedMessageCount = -1;
+                await loadMessages(true);
+            } else {
+                alert(data.text || "Failed to clear messages.");
+            }
+        } catch (e) {
+            alert("Error clearing messages: " + e.message);
+        }
+    }
+
+    function copyChatMessage(btn, text) {
+        if (!text) return;
+        const prev = btn.textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            btn.textContent = "✅ Copied!";
+            setTimeout(() => { btn.textContent = prev; }, 1500);
+        }).catch(() => {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            document.body.removeChild(ta);
+            btn.textContent = "✅ Copied!";
+            setTimeout(() => { btn.textContent = prev; }, 1500);
+        });
     }
 
     async function loadFolderChoices() {
@@ -1300,7 +1765,11 @@ HTML_PAGE = r"""
         closeFsModal();
     }
 
-    window.addEventListener("DOMContentLoaded", loadFolderChoices);
+    window.addEventListener("DOMContentLoaded", () => {
+        loadFolderChoices();
+        loadMessages(true);
+        setInterval(() => loadMessages(false), 2500);
+    });
 </script>
 </body>
 </html>
@@ -1315,6 +1784,14 @@ def index():
     return render_template_string(HTML_PAGE, is_host=is_host_request())
 
 
+@app.get("/api/messages")
+def api_get_messages():
+    return jsonify({
+        "success": True,
+        "messages": MESSAGES,
+    })
+
+
 @app.post("/api/message")
 def api_message():
     data = request.get_json(silent=True) or {}
@@ -1323,8 +1800,51 @@ def api_message():
     if not message:
         return jsonify({"success": False, "text": "Message is empty."}), 400
 
-    print(f"New message: {message}")
-    return jsonify({"success": True, "text": "Message received successfully on laptop."})
+    client_remote_ip = request.remote_addr or "127.0.0.1"
+    ua = request.headers.get("User-Agent", "")
+    timestamp = datetime.now().strftime("%I:%M %p")
+    local_server_ip = get_local_ip()
+    is_host = is_host_request()
+
+    # Automatically detect Server PC or Client PC name
+    if is_host or client_remote_ip == local_server_ip or client_remote_ip in ("127.0.0.1", "::1", "localhost"):
+        sender_name = f"{HOST_PC_NAME} (Server)"
+        sender_ip = local_server_ip
+        is_pc = True
+    else:
+        # Client PC or device
+        sender_name = resolve_client_name(client_remote_ip, ua)
+        sender_ip = client_remote_ip
+        is_pc = (
+            ("Windows" in ua or "Macintosh" in ua or "Linux" in ua)
+            and ("Mobile" not in ua and "Android" not in ua)
+        ) or bool(sender_name and sender_name != "Client Device" and "Android" not in sender_name and "iPhone" not in sender_name)
+
+    msg_obj = {
+        "id": len(MESSAGES) + 1,
+        "is_host": is_host,
+        "is_pc": is_pc,
+        "sender_name": sender_name,
+        "sender_ip": sender_ip,
+        "text": message,
+        "time": timestamp,
+    }
+    MESSAGES.append(msg_obj)
+    if len(MESSAGES) > 100:
+        MESSAGES.pop(0)
+
+    print(f"[{sender_name} | {sender_ip} | {timestamp}]: {message}")
+    return jsonify({
+        "success": True,
+        "text": "Message sent successfully.",
+        "message": msg_obj,
+    })
+
+
+@app.post("/api/messages/clear")
+def api_clear_messages():
+    MESSAGES.clear()
+    return jsonify({"success": True, "text": "All messages cleared."})
 
 
 @app.get("/api/folders")
