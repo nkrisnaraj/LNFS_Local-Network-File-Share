@@ -35,3 +35,6 @@ dist/
 
 # Logs
 *.log
+
+#shared folder
+shared_folders.json
